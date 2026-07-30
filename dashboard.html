@@ -184,7 +184,7 @@
     </div>
 
     <div class="card">
-      <div class="label">Outdoor Temp <span class="src-tag">via Weather API</span></div>
+      <div class="label">Outdoor Temp <span class="src-tag" id="outdoor-src-tag">via Weather API</span></div>
       <div class="value" id="outdoor-temp-value">--°C</div>
       <div class="sub" id="weather-update">weather updated: --</div>
     </div>
@@ -198,6 +198,16 @@
     <div class="card">
       <div class="label">Humidity <span class="src-tag">via Weather API</span></div>
       <div class="value" id="humidity-value">--%</div>
+    </div>
+
+    <div class="card">
+      <div class="label">Financial Savings <span class="src-tag">smart vs always-on baseline</span></div>
+      <div class="value" id="savings-cost-value">₹0.00</div>
+      <div class="sub" id="savings-energy-sub">0.000 kWh saved</div>
+      <div class="sub" id="savings-since">tracking since: --</div>
+      <div style="margin-top:10px;">
+        <button id="reset-savings-btn">Reset Counter</button>
+      </div>
     </div>
   </div>
 
@@ -303,19 +313,38 @@ async function refresh() {
       ? "last occupancy update: " + new Date(state.last_occupancy_update).toLocaleTimeString()
       : "waiting for occupancy data…";
 
-    if (state.weather_error) {
-      document.getElementById("weather-update").textContent = "weather API unreachable — showing last known values";
+    if (!state.weather_available) {
+      document.getElementById("outdoor-src-tag").textContent = "no sensor detected — mirroring indoor";
+      document.getElementById("weather-update").textContent = state.weather_error
+        ? "weather unavailable (" + state.weather_error + ") — outdoor temp synced to indoor"
+        : "outdoor sensor not detected — outdoor temp synced to indoor";
     } else {
+      document.getElementById("outdoor-src-tag").textContent = "via Weather API";
       document.getElementById("weather-update").textContent = state.last_weather_update
         ? "weather updated: " + new Date(state.last_weather_update).toLocaleTimeString()
         : "waiting for first weather fetch…";
     }
+
+    const sv = state.savings;
+    document.getElementById("savings-cost-value").textContent =
+      "₹" + sv.cost_saved.toFixed(2);
+    document.getElementById("savings-energy-sub").textContent =
+      sv.energy_saved_kwh.toFixed(3) + " kWh saved (vs always-on baseline)";
+    document.getElementById("savings-since").textContent = sv.tracking_since
+      ? "tracking since: " + new Date(sv.tracking_since).toLocaleString()
+      : "tracking since: --";
 
     renderDevices(state);
   } catch (e) {
     document.getElementById("conn-text").textContent = "disconnected";
   }
 }
+
+async function resetSavings() {
+  await fetch("/api/savings/reset", { method: "POST" });
+  refresh();
+}
+document.getElementById("reset-savings-btn").addEventListener("click", resetSavings);
 
 refresh();
 setInterval(refresh, POLL_MS);
