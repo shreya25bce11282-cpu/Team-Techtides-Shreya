@@ -39,7 +39,7 @@ def main():
         annotated_frame = results[0].plot()
         
         # This opens a window showing the live feed (only works on a desktop interface)
-        cv2.imshow("AEGIS-Eco AI Vision", annotated_frame)
+        #cv2.imshow("AEGIS-Eco AI Vision", annotated_frame)
         # ----------------------------------
 
         current_time = time.time()
