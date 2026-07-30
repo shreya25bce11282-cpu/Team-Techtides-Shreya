@@ -204,61 +204,6 @@
   footer { text-align: center; color: var(--muted-dim); font-size: 12px; margin-top: 40px; font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.05em; }
 
   @media (max-width: 480px) { button.active { transform: scale(1.04) translateY(-1px); } }
-
-  /* -----------------------------------------------------------------
-     COMPACT / KIOSK MODE -- for small physical panels (e.g. 5" screens,
-     ~800x480 or smaller). Triggered by viewport height, since that's
-     the dimension that actually causes scrolling on these displays.
-     Keeps the heading + the 3-button device controls prominent up top;
-     everything else shrinks down to fit underneath with no scroll.
-     ----------------------------------------------------------------- */
-  @media (max-height: 620px) {
-    body { padding: 10px 12px 12px; }
-    .wrap { max-width: 100%; }
-
-    header { margin-bottom: 10px; gap: 8px; }
-    .brand h1 { font-size: 20px; margin: 0 0 2px; }
-    .brand .tagline { font-size: 10px; }
-    .conn { padding: 5px 12px; font-size: 11px; gap: 6px; }
-    .dot { width: 6px; height: 6px; }
-
-    .control-center { margin: 0 0 10px; }
-    .devices { grid-template-columns: repeat(3, 1fr); gap: 8px; }
-
-    .device-row { padding: 8px; gap: 8px; border-radius: 12px; box-shadow: none; }
-    .device-main { gap: 8px; }
-    .device-chip { width: 32px; height: 32px; border-radius: 9px; font-size: 15px; }
-    .device-row .name { font-size: 11px; margin-bottom: 3px; }
-    .pill { font-size: 8px; padding: 3px 7px; gap: 4px; }
-    .pill-dot { width: 4px; height: 4px; }
-
-    .btn-group { gap: 4px; }
-    button { height: 30px; font-size: 8.5px; border-radius: 8px; border-width: 1.5px; }
-    button:hover { transform: none; box-shadow: none; }
-    button.active { transform: none; }
-
-    .grid-section { border-top: none; padding-top: 8px; }
-    .grid { grid-template-columns: repeat(6, 1fr); gap: 6px; margin-bottom: 8px; }
-    .card { padding: 8px; border-radius: 10px; }
-    .card .label { font-size: 7.5px; margin-bottom: 4px; gap: 3px; }
-    .icon { font-size: 11px; }
-    .src-tag { font-size: 7px; padding: 2px 5px; }
-    .card .value { font-size: 14px; margin-bottom: 2px; }
-    .card .sub { font-size: 8px; }
-    #reset-savings-btn { margin-top: 4px; height: 22px; font-size: 8px; }
-
-    .radar { width: 42px; height: 42px; margin: 0 auto 4px; }
-    .radar-count { font-size: 15px; }
-
-    .status-footer, footer { display: none; }
-  }
-
-  /* Below ~380px tall (very small panels), drop the stats row entirely
-     so the heading + device controls always keep their full readable
-     size and never get squeezed past the point of being usable. */
-  @media (max-height: 400px) {
-    .grid-section { display: none; }
-  }
 </style>
 </head>
 <body>
