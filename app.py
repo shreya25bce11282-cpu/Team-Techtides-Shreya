@@ -54,6 +54,23 @@ TEMP_DIFF_THRESHOLD = 1.0  # °C
 FAN_ON_TEMP = 26.0   # °C, fan switches on above this
 FAN_OFF_TEMP = 24.0  # °C, fan switches off below this
 
+# How long to keep treating the room as "occupied" after the sensor reports
+# 0 people, before actually cutting fan/lights. The camera node posts a fresh
+# occupant_count from a SINGLE frame every ~2s, so any one frame with a missed
+# detection (motion blur, someone turning away, brief occlusion) would
+# otherwise instantly read as "room empty" and flick the fan/lights off, then
+# back on next frame. This grace window smooths that out.
+OCCUPANCY_GRACE_SECONDS = 60.0
+
+# The BMP280 gives a fresh, individually-noisy reading every control-loop tick
+# (every TICK_SECONDS). A single noisy sample right at the FAN_ON_TEMP /
+# FAN_OFF_TEMP edge (self-heating drift, a passing draft, sensor jitter) would
+# otherwise be enough to flip the fan for a moment even though the room hasn't
+# really changed temperature. TEMP_SMOOTHING_ALPHA controls an exponential
+# moving average used ONLY for the fan decision (the dashboard still shows the
+# live raw reading) -- lower alpha = smoother/slower to react, higher = snappier.
+TEMP_SMOOTHING_ALPHA = 0.2
+
 DEBUG_MODE = os.getenv("FLASK_DEBUG", "false").lower() == "true"
 
 
@@ -232,18 +249,38 @@ def _device_on(device: str) -> bool:
     return state[f"{device}_on"]
 
 
+_last_occupied_at = None  # wall-clock time we last saw occupant_count > 0
+_smoothed_indoor_temp = None  # EMA of indoor temp, used only for fan decisions
+
+
 def control_loop():
+    global _last_occupied_at, _smoothed_indoor_temp
     while True:
         indoor_temp = read_indoor_temperature()
 
         with state_lock:
             state["indoor_temperature"] = indoor_temp
 
+            if _smoothed_indoor_temp is None:
+                _smoothed_indoor_temp = indoor_temp
+            else:
+                _smoothed_indoor_temp += TEMP_SMOOTHING_ALPHA * (indoor_temp - _smoothed_indoor_temp)
+
             if not state["weather_available"]:
                 state["outdoor_temperature"] = indoor_temp
 
             now = datetime.now(UTC)
-            occupied = state["occupant_count"] > 0
+            raw_occupied = state["occupant_count"] > 0
+
+            if raw_occupied:
+                _last_occupied_at = now
+                occupied = True
+            elif _last_occupied_at is not None and (now - _last_occupied_at) < timedelta(seconds=OCCUPANCY_GRACE_SECONDS):
+                # Sensor just said 0, but the room was occupied within the
+                # grace window -- hold steady instead of flickering.
+                occupied = True
+            else:
+                occupied = False
 
             # Override Auto-revert logic
             for dev_name, ov in state["overrides"].items():
@@ -268,11 +305,11 @@ def control_loop():
 
             # FAN logic
             if not state["overrides"]["fan"]["active"]:
-                if state["occupant_count"] == 0:
+                if not occupied:
                     new_fan_state = False
-                elif state["indoor_temperature"] > FAN_ON_TEMP:
+                elif _smoothed_indoor_temp > FAN_ON_TEMP:
                     new_fan_state = True
-                elif state["indoor_temperature"] < FAN_OFF_TEMP:
+                elif _smoothed_indoor_temp < FAN_OFF_TEMP:
                     new_fan_state = False
                 else:
                     new_fan_state = state["fan_on"]
@@ -283,14 +320,14 @@ def control_loop():
 
             # LIGHT 1 logic
             if not state["overrides"]["light_1"]["active"]:
-                new_light_state = state["occupant_count"] > 0
+                new_light_state = occupied
                 if new_light_state != state["light_1_on"]:
                     state["light_1_on"] = new_light_state
                     set_relay("light_1", new_light_state)
 
             # LIGHT 2 logic
             if not state["overrides"]["light_2"]["active"]:
-                new_light_state = state["occupant_count"] > 0
+                new_light_state = occupied
                 if new_light_state != state["light_2_on"]:
                     state["light_2_on"] = new_light_state
                     set_relay("light_2", new_light_state)
