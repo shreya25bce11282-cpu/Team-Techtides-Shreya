@@ -124,8 +124,9 @@ state_lock = threading.Lock()
 state = {
     "occupant_count": 0,
     "indoor_temperature": 25.0,   # from BMP280, on this Pi
-    "outdoor_temperature": 25.0,  # from weather API
+    "outdoor_temperature": 25.0,  # from weather API, or mirrored from indoor if unavailable
     "humidity": 50.0,             # outdoor humidity, from weather API
+    "weather_available": False,   # true once we've had a successful weather fetch
     "fan_on": False,
     "ac_level": "off",       # "off" | "low" | "medium" | "max"
     "light_on": False,
@@ -136,6 +137,13 @@ state = {
         "active": False,
         "device": None,
         "expires_at": None,
+    },
+    "savings": {
+        "tracking_since": datetime.now(UTC).isoformat(),
+        "energy_used_kwh": 0.0,
+        "energy_baseline_kwh": 0.0,   # what it WOULD have used if everything ran 24/7
+        "energy_saved_kwh": 0.0,
+        "cost_saved": 0.0,            # ₹, matches dashboard.html's sv.cost_saved
     },
 }
 
@@ -149,6 +157,7 @@ def fetch_weather():
     if not WEATHER_API_KEY:
         with state_lock:
             state["weather_error"] = "No OPENWEATHER_API_KEY found -- check your .env file"
+            state["weather_available"] = False
         print("[WEATHER] No API key loaded -- is .env present with OPENWEATHER_API_KEY set?")
         return
 
@@ -162,14 +171,17 @@ def fetch_weather():
             state["humidity"] = float(data["main"]["humidity"])
             state["last_weather_update"] = datetime.now(UTC).isoformat()
             state["weather_error"] = None
+            state["weather_available"] = True
 
         print(f"[WEATHER] outdoor {state['outdoor_temperature']}°C, {state['humidity']}% humidity")
 
     except Exception as e:
-        # keep the LAST KNOWN reading rather than zeroing out -- a stale
-        # value is safer than a fake sudden drop that could trip the AC/fan logic
+        # don't zero out -- the control loop will mirror indoor temp onto
+        # outdoor_temperature every tick while weather_available is False,
+        # so the dashboard always has a real, live number to show
         with state_lock:
             state["weather_error"] = str(e)
+            state["weather_available"] = False
         print(f"[WEATHER] fetch failed: {e}")
 
 
@@ -177,6 +189,70 @@ def weather_loop():
     while True:
         fetch_weather()
         time.sleep(WEATHER_POLL_SECONDS)
+
+
+# ----------------------------------------------------------------------
+# 4b. SAVINGS TRACKER
+# ----------------------------------------------------------------------
+# Compares actual energy used against a baseline of "everything ran
+# continuously since tracking started" to estimate money saved. Feeds the
+# "Financial Savings" card on the dashboard.
+
+# Rough wattage estimates -- adjust to match whatever you actually demo with.
+APPLIANCE_WATTS = {"fan": 75, "light": 40, "ac": 1500}  # ac watts = its "max" draw
+AC_LEVEL_FACTOR = {"off": 0.0, "low": 0.3, "medium": 0.6, "max": 1.0}
+ENERGY_PRICE_PER_KWH = 8.0  # ₹ per unit -- change to your local electricity tariff
+TICK_SECONDS = 2  # must match the time.sleep() at the bottom of control_loop
+
+# Internal bookkeeping -- NOT sent to the frontend directly, only the
+# computed results in state["savings"] are.
+_on_seconds = {"fan": 0.0, "light": 0.0, "ac_weighted": 0.0}
+
+
+def update_savings(now: datetime):
+    """Called once per control_loop tick, while state_lock is already held."""
+    if state["fan_on"]:
+        _on_seconds["fan"] += TICK_SECONDS
+    if state["light_on"]:
+        _on_seconds["light"] += TICK_SECONDS
+    _on_seconds["ac_weighted"] += TICK_SECONDS * AC_LEVEL_FACTOR[state["ac_level"]]
+
+    tracking_since = datetime.fromisoformat(state["savings"]["tracking_since"])
+    elapsed_seconds = (now - tracking_since).total_seconds()
+    if elapsed_seconds <= 0:
+        return
+
+    baseline_kwh = (
+        (APPLIANCE_WATTS["fan"] + APPLIANCE_WATTS["light"] + APPLIANCE_WATTS["ac"])
+        * (elapsed_seconds / 3600)
+    ) / 1000
+
+    used_kwh = (
+        APPLIANCE_WATTS["fan"] * (_on_seconds["fan"] / 3600)
+        + APPLIANCE_WATTS["light"] * (_on_seconds["light"] / 3600)
+        + APPLIANCE_WATTS["ac"] * (_on_seconds["ac_weighted"] / 3600)
+    ) / 1000
+
+    saved_kwh = baseline_kwh - used_kwh
+
+    state["savings"]["energy_used_kwh"] = round(used_kwh, 4)
+    state["savings"]["energy_baseline_kwh"] = round(baseline_kwh, 4)
+    state["savings"]["energy_saved_kwh"] = round(saved_kwh, 4)
+    state["savings"]["cost_saved"] = round(saved_kwh * ENERGY_PRICE_PER_KWH, 2)
+
+
+def reset_savings():
+    """Called by the dashboard's 'Reset Counter' button, while state_lock is held."""
+    _on_seconds["fan"] = 0.0
+    _on_seconds["light"] = 0.0
+    _on_seconds["ac_weighted"] = 0.0
+    state["savings"] = {
+        "tracking_since": datetime.now(UTC).isoformat(),
+        "energy_used_kwh": 0.0,
+        "energy_baseline_kwh": 0.0,
+        "energy_saved_kwh": 0.0,
+        "cost_saved": 0.0,
+    }
 
 
 # ----------------------------------------------------------------------
@@ -202,6 +278,14 @@ def control_loop():
 
         with state_lock:
             state["indoor_temperature"] = indoor_temp
+
+            # If we have no working weather feed, mirror outdoor to indoor so
+            # there's always a real, live number on the dashboard (never a
+            # stale default) -- and the diff naturally becomes 0, so the
+            # AC diff-rule below won't misfire from missing data.
+            if not state["weather_available"]:
+                state["outdoor_temperature"] = indoor_temp
+
             now = datetime.now(UTC)
 
             ov = state["override"]
@@ -230,19 +314,23 @@ def control_loop():
                     state["fan_on"] = new_fan_state
                     set_relay("fan", new_fan_state)
 
-            # AC: indoor/outdoor diff rule.
-            # If indoor and outdoor temps meaningfully differ -> force AC off.
-            # If they DON'T differ -> do nothing, leave ac_level exactly as-is.
-            # NOTE: as written, this rule can only ever turn AC off or leave it
-            # alone -- it never turns AC on by itself. Combine with occupancy
-            # scaling (ac_level_for) below if you want it to also turn on.
+            # AC: combines your indoor/outdoor diff rule with occupancy-based
+            # dynamic load scaling.
+            # - If indoor/outdoor temps meaningfully differ -> force AC off.
+            # - Otherwise -> scale AC to occupant count (ac_level_for), so it
+            #   can actually turn ON, not just off. This restores the "Dynamic
+            #   Load Scaling" behavior from the pitch deck, which the diff
+            #   rule alone couldn't do by itself.
             if override_device != "ac":
                 diff = abs(state["indoor_temperature"] - state["outdoor_temperature"])
                 if diff > TEMP_DIFF_THRESHOLD:
-                    if state["ac_level"] != "off":
-                        state["ac_level"] = "off"
-                        set_relay("ac", False)
-                # else: diff is small -> "do nothing", ac_level unchanged
+                    new_ac_level = "off"
+                else:
+                    new_ac_level = ac_level_for(state["occupant_count"])
+
+                if new_ac_level != state["ac_level"]:
+                    state["ac_level"] = new_ac_level
+                    set_relay("ac", new_ac_level != "off")
 
             # LIGHT: occupancy only
             if override_device != "light":
@@ -251,7 +339,10 @@ def control_loop():
                     state["light_on"] = new_light_state
                     set_relay("light", new_light_state)
 
-        time.sleep(2)
+            # SAVINGS: update the running ROI numbers using this tick's device states
+            update_savings(now)
+
+        time.sleep(TICK_SECONDS)
 
 
 # ----------------------------------------------------------------------
@@ -332,6 +423,14 @@ def override():
 def cancel_override():
     with state_lock:
         state["override"] = {"active": False, "device": None, "expires_at": None}
+    return jsonify({"ok": True, "state": state})
+
+
+@app.route("/api/savings/reset", methods=["POST"])
+def savings_reset():
+    """Called by the dashboard's 'Reset Counter' button."""
+    with state_lock:
+        reset_savings()
     return jsonify({"ok": True, "state": state})
 
 
