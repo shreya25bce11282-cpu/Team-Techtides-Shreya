@@ -303,21 +303,6 @@ def control_loop():
                     ov["expires_at"] = None
                     ov["duration_minutes"] = None
 
-            # FAN logic
-            if not state["overrides"]["fan"]["active"]:
-                if not occupied:
-                    new_fan_state = False
-                elif _smoothed_indoor_temp > FAN_ON_TEMP:
-                    new_fan_state = True
-                elif _smoothed_indoor_temp < FAN_OFF_TEMP:
-                    new_fan_state = False
-                else:
-                    new_fan_state = state["fan_on"]
-
-                if new_fan_state != state["fan_on"]:
-                    state["fan_on"] = new_fan_state
-                    set_relay("fan", new_fan_state)
-
             # LIGHT 1 logic
             if not state["overrides"]["light_1"]["active"]:
                 new_light_state = occupied
@@ -331,6 +316,13 @@ def control_loop():
                 if new_light_state != state["light_2_on"]:
                     state["light_2_on"] = new_light_state
                     set_relay("light_2", new_light_state)
+
+            # FAN logic (Now triggered right after lights and directly follows occupancy state)
+            if not state["overrides"]["fan"]["active"]:
+                new_fan_state = occupied
+                if new_fan_state != state["fan_on"]:
+                    state["fan_on"] = new_fan_state
+                    set_relay("fan", new_fan_state)
 
             # Update savings ROI
             update_savings(now)
