@@ -146,9 +146,9 @@ state = {
     "last_weather_update": None,    # from the weather API
     "weather_error": None,          # so the dashboard can show "weather unreachable"
     "overrides": {
-        "fan": {"active": False, "expires_at": None},
-        "ac": {"active": False, "expires_at": None},
-        "light": {"active": False, "expires_at": None},
+        "fan": {"active": False, "expires_at": None, "duration_minutes": None},
+        "ac": {"active": False, "expires_at": None, "duration_minutes": None},
+        "light": {"active": False, "expires_at": None, "duration_minutes": None},
     },
     "savings": {
         "tracking_since": datetime.now(UTC).isoformat(),
@@ -282,6 +282,13 @@ def ac_level_for(occupant_count: int) -> str:
         return "max"
 
 
+def _device_on(device: str) -> bool:
+    """True if the given device is currently drawing power, regardless of auto/manual."""
+    if device == "ac":
+        return state["ac_level"] != "off"
+    return state[f"{device}_on"]
+
+
 def control_loop():
     while True:
         # do the I2C read BEFORE grabbing the lock, so the lock is held for
@@ -299,15 +306,46 @@ def control_loop():
                 state["outdoor_temperature"] = indoor_temp
 
             now = datetime.now(UTC)
+            occupied = state["occupant_count"] > 0
 
-            # Each device tracks its own override independently now -- check
-            # every one for expiry, rather than one shared override slot.
+            # Each device tracks its own override independently. The auto-revert
+            # countdown is occupancy-aware, not just a fixed timer from creation:
+            #
+            #   - Manually turned OFF while someone's still in the room -> that
+            #     was a deliberate call, so we DON'T start/keep a revert
+            #     countdown. It stays off until someone cancels it or the room
+            #     empties and it gets turned back on some other way.
+            #   - Left ON while the room is empty -> that's the wasteful case
+            #     (lights on with nobody there), so a countdown to auto-revert
+            #     starts (or keeps running) until it reverts to automatic.
             for dev_name, ov in state["overrides"].items():
-                if ov["active"] and ov["expires_at"] is not None:
-                    if now >= datetime.fromisoformat(ov["expires_at"]):
-                        print(f"[OVERRIDE] {dev_name} override expired, reverting to auto")
-                        ov["active"] = False
-                        ov["expires_at"] = None
+                if not ov["active"]:
+                    continue
+
+                on_now = _device_on(dev_name)
+
+                if occupied and not on_now:
+                    # Deliberate manual OFF while people are present -- pause
+                    # any countdown, hold this state indefinitely.
+                    if ov["expires_at"] is not None:
+                        print(f"[OVERRIDE] {dev_name} manually off while occupied -- countdown paused")
+                    ov["expires_at"] = None
+
+                elif not occupied and on_now:
+                    # Left on with nobody in the room -- start a countdown if
+                    # one isn't already running.
+                    if ov["expires_at"] is None:
+                        minutes = ov.get("duration_minutes") or 30
+                        ov["expires_at"] = (now + timedelta(minutes=minutes)).isoformat()
+                        print(f"[OVERRIDE] {dev_name} left on with room empty -- reverting in {minutes}m")
+
+                # else (occupied+on, or empty+off): leave the countdown as-is
+
+                if ov["expires_at"] is not None and now >= datetime.fromisoformat(ov["expires_at"]):
+                    print(f"[OVERRIDE] {dev_name} override expired, reverting to auto")
+                    ov["active"] = False
+                    ov["expires_at"] = None
+                    ov["duration_minutes"] = None
 
             # FAN: temperature hysteresis, now using the real INDOOR reading,
             # gated by occupancy
@@ -449,6 +487,7 @@ def override():
         state["overrides"][device] = {
             "active": True,
             "expires_at": expires_at.isoformat(),
+            "duration_minutes": duration,
         }
 
         if device == "fan":
@@ -475,7 +514,7 @@ def cancel_override():
         return jsonify({"ok": False, "error": f"device must be one of {list(RELAY_PINS)}"}), 400
 
     with state_lock:
-        state["overrides"][device] = {"active": False, "expires_at": None}
+        state["overrides"][device] = {"active": False, "expires_at": None, "duration_minutes": None}
     return jsonify({"ok": True, "state": state})
 
 
