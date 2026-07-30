@@ -236,6 +236,25 @@
   button.off-btn:hover { border-color: var(--muted); color: var(--muted); background: var(--slate-dim); }
   button.cancel:hover { border-color: var(--coral); color: var(--coral); background: var(--coral-dim); }
 
+  /* --- On / Off / Auto manual control buttons --- */
+  button.btn-on { border-color: #22c55e; color: #22c55e; }
+  button.btn-on:hover { background: rgba(34, 197, 94, 0.14); }
+  button.btn-on.active { background: #22c55e; color: #062910; border-color: #22c55e; }
+
+  button.btn-off { border-color: #ef4444; color: #ef4444; }
+  button.btn-off:hover { background: rgba(239, 68, 68, 0.14); }
+  button.btn-off.active { background: #ef4444; color: #2a0808; border-color: #ef4444; }
+
+  button.btn-auto { border-color: var(--amber); color: var(--amber); }
+  button.btn-auto:hover { background: var(--amber-dim); }
+  button.btn-auto.active { background: var(--amber); color: #2b1e02; border-color: var(--amber); }
+
+  @keyframes btn-blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.25; }
+  }
+  button.blinking { animation: btn-blink 0.2s ease-in-out 3; }
+
   #reset-savings-btn { margin-top: 4px; }
 
   footer {
@@ -378,6 +397,12 @@ function renderDevices(state) {
 
     const row = document.createElement("div");
     row.className = "device-row";
+
+    // Which of the three buttons should look "active" right now.
+    const onActive = isOverridden && isOn;
+    const offActive = isOverridden && !isOn;
+    const autoActive = !isOverridden;
+
     row.innerHTML = `
       <div class="device-main">
         <div class="device-chip ${isOn ? 'on' : ''}">${meta.icon}</div>
@@ -387,19 +412,29 @@ function renderDevices(state) {
         </div>
       </div>
       <div class="btn-group">
-        <button data-dev="${dev}" data-on="true">Force ON</button>
-        <button class="off-btn" data-dev="${dev}" data-on="false">Force OFF</button>
-        ${isOverridden ? `<button class="cancel" data-cancel="${dev}">Cancel</button>` : ""}
+        <button class="btn-on${onActive ? " active" : ""}" data-dev="${dev}" data-mode="on">Force ON</button>
+        <button class="btn-auto${autoActive ? " active" : ""}" data-dev="${dev}" data-mode="auto">Auto</button>
+        <button class="btn-off${offActive ? " active" : ""}" data-dev="${dev}" data-mode="off">Force OFF</button>
       </div>
     `;
     container.appendChild(row);
   });
 
   container.querySelectorAll("button[data-dev]").forEach((btn) => {
-    btn.addEventListener("click", () => sendOverride(btn.dataset.dev, btn.dataset.on === "true"));
-  });
-  container.querySelectorAll("button[data-cancel]").forEach((btn) => {
-    btn.addEventListener("click", () => cancelOverride(btn.dataset.cancel));
+    btn.addEventListener("click", () => {
+      // Quick blink flash for immediate feedback, before the API round-trip
+      // and refresh() re-render confirm the new state.
+      btn.classList.add("blinking");
+      setTimeout(() => btn.classList.remove("blinking"), 600);
+
+      const mode = btn.dataset.mode;
+      const dev = btn.dataset.dev;
+      if (mode === "auto") {
+        cancelOverride(dev);
+      } else {
+        sendOverride(dev, mode === "on");
+      }
+    });
   });
 }
 
