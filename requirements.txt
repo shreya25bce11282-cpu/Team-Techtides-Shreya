@@ -1,0 +1,8 @@
+flask
+requests
+python-dotenv
+ultralytics
+opencv-python
+gpiozero
+bmp280
+smbus2
