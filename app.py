@@ -21,7 +21,7 @@ import os
 import random
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 
 import requests
 from dotenv import load_dotenv
@@ -160,7 +160,7 @@ def fetch_weather():
         with state_lock:
             state["outdoor_temperature"] = float(data["main"]["temp"])
             state["humidity"] = float(data["main"]["humidity"])
-            state["last_weather_update"] = datetime.utcnow().isoformat()
+            state["last_weather_update"] = datetime.now(UTC).isoformat()
             state["weather_error"] = None
 
         print(f"[WEATHER] outdoor {state['outdoor_temperature']}°C, {state['humidity']}% humidity")
@@ -202,7 +202,7 @@ def control_loop():
 
         with state_lock:
             state["indoor_temperature"] = indoor_temp
-            now = datetime.utcnow()
+            now = datetime.now(UTC)
 
             ov = state["override"]
             if ov["active"] and ov["expires_at"] is not None:
@@ -283,7 +283,7 @@ def sensor_update():
     with state_lock:
         if "occupant_count" in data:
             state["occupant_count"] = int(data["occupant_count"])
-        state["last_occupancy_update"] = datetime.utcnow().isoformat()
+        state["last_occupancy_update"] = datetime.now(UTC).isoformat()
 
     return jsonify({"ok": True, "state": state})
 
@@ -309,7 +309,7 @@ def override():
         return jsonify({"ok": False, "error": "unknown device"}), 400
 
     with state_lock:
-        expires_at = datetime.utcnow() + timedelta(minutes=duration)
+        expires_at = datetime.now(UTC) + timedelta(minutes=duration)
         state["override"] = {
             "active": True,
             "device": device,
