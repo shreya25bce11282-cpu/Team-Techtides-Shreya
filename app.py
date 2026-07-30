@@ -145,10 +145,10 @@ state = {
     "last_occupancy_update": None,  # from your radar/camera teammates
     "last_weather_update": None,    # from the weather API
     "weather_error": None,          # so the dashboard can show "weather unreachable"
-    "override": {
-        "active": False,
-        "device": None,
-        "expires_at": None,
+    "overrides": {
+        "fan": {"active": False, "expires_at": None},
+        "ac": {"active": False, "expires_at": None},
+        "light": {"active": False, "expires_at": None},
     },
     "savings": {
         "tracking_since": datetime.now(UTC).isoformat(),
@@ -300,19 +300,18 @@ def control_loop():
 
             now = datetime.now(UTC)
 
-            ov = state["override"]
-            if ov["active"] and ov["expires_at"] is not None:
-                if now >= datetime.fromisoformat(ov["expires_at"]):
-                    print(f"[OVERRIDE] {ov['device']} override expired, reverting to auto")
-                    ov["active"] = False
-                    ov["device"] = None
-                    ov["expires_at"] = None
-
-            override_device = state["override"]["device"] if state["override"]["active"] else None
+            # Each device tracks its own override independently now -- check
+            # every one for expiry, rather than one shared override slot.
+            for dev_name, ov in state["overrides"].items():
+                if ov["active"] and ov["expires_at"] is not None:
+                    if now >= datetime.fromisoformat(ov["expires_at"]):
+                        print(f"[OVERRIDE] {dev_name} override expired, reverting to auto")
+                        ov["active"] = False
+                        ov["expires_at"] = None
 
             # FAN: temperature hysteresis, now using the real INDOOR reading,
             # gated by occupancy
-            if override_device != "fan":
+            if not state["overrides"]["fan"]["active"]:
                 if state["occupant_count"] == 0:
                     new_fan_state = False
                 elif state["indoor_temperature"] > FAN_ON_TEMP:
@@ -333,7 +332,7 @@ def control_loop():
             #   can actually turn ON, not just off. This restores the "Dynamic
             #   Load Scaling" behavior from the pitch deck, which the diff
             #   rule alone couldn't do by itself.
-            if override_device != "ac":
+            if not state["overrides"]["ac"]["active"]:
                 diff = abs(state["indoor_temperature"] - state["outdoor_temperature"])
                 if diff > TEMP_DIFF_THRESHOLD:
                     new_ac_level = "off"
@@ -345,7 +344,7 @@ def control_loop():
                     set_relay("ac", new_ac_level != "off")
 
             # LIGHT: occupancy only
-            if override_device != "light":
+            if not state["overrides"]["light"]["active"]:
                 new_light_state = state["occupant_count"] > 0
                 if new_light_state != state["light_on"]:
                     state["light_on"] = new_light_state
@@ -447,9 +446,8 @@ def override():
 
     with state_lock:
         expires_at = datetime.now(UTC) + timedelta(minutes=duration)
-        state["override"] = {
+        state["overrides"][device] = {
             "active": True,
-            "device": device,
             "expires_at": expires_at.isoformat(),
         }
 
@@ -467,8 +465,17 @@ def override():
 
 @app.route("/api/override/cancel", methods=["POST"])
 def cancel_override():
+    """
+    Expected JSON body:
+    { "device": "fan" }   # "fan" | "ac" | "light"
+    """
+    data = request.get_json(silent=True)
+    device = data.get("device") if data else None
+    if device not in RELAY_PINS:
+        return jsonify({"ok": False, "error": f"device must be one of {list(RELAY_PINS)}"}), 400
+
     with state_lock:
-        state["override"] = {"active": False, "device": None, "expires_at": None}
+        state["overrides"][device] = {"active": False, "expires_at": None}
     return jsonify({"ok": True, "state": state})
 
 

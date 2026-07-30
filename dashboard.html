@@ -248,7 +248,7 @@ function renderDevices(state) {
   container.innerHTML = "";
 
   devices.forEach((dev) => {
-    const isOverridden = state.override.active && state.override.device === dev;
+    const isOverridden = state.overrides[dev].active;
     let statusText, isOn;
 
     if (dev === "ac") {
@@ -263,7 +263,7 @@ function renderDevices(state) {
     row.className = "device-row";
 
     const statusClass = isOverridden ? "override" : (isOn ? "on" : "");
-    const overrideNote = isOverridden ? ` · manual · ${fmtCountdown(state.override.expires_at)}` : " · auto";
+    const overrideNote = isOverridden ? ` · manual · ${fmtCountdown(state.overrides[dev].expires_at)}` : " · auto";
 
     row.innerHTML = `
       <div>
@@ -297,7 +297,11 @@ async function sendOverride(device, on) {
 }
 
 async function cancelOverride(device) {
-  await fetch("/api/override/cancel", { method: "POST" });
+  await fetch("/api/override/cancel", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ device }),
+  });
   refresh();
 }
 
