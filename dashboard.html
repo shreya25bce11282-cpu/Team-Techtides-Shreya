@@ -281,7 +281,9 @@
     <div class="conn"><span class="dot"></span><span id="conn-text">connecting…</span></div>
   </header>
 
-  <div class="grid" style="grid-template-columns: 170px repeat(auto-fit, minmax(190px, 1fr));">
+  <div class="devices" id="devices"></div>
+
+  <div class="grid" style="grid-template-columns: 170px repeat(auto-fit, minmax(190px, 1fr)); margin-top: 24px;">
     <div class="card" style="text-align:center;">
       <div class="radar">
         <div class="radar-count" id="occupant-count">0</div>
@@ -324,8 +326,6 @@
   </div>
 
   <div class="sub" id="occupancy-update" style="text-align:center; margin-bottom:20px;">last occupancy update: --</div>
-
-  <div class="devices" id="devices"></div>
 
   <footer id="hw-mode">AEGIS-Eco backend</footer>
 </div>
