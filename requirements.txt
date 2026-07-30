@@ -1,0 +1,11 @@
+# Core backend -- needed everywhere (laptop or Pi)
+flask
+requests
+python-dotenv
+
+# Hardware-only -- needed on the actual Raspberry Pi, NOT on a laptop for dev/testing.
+# These will fail to install/import on a laptop, which is expected -- app.py
+# automatically falls back to mock mode when they're unavailable.
+gpiozero
+smbus2
+bmp280

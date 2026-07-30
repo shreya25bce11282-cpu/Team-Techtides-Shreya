@@ -59,6 +59,18 @@ WEATHER_PARAMS = {
 # normal sensor noise when the two readings are basically the same.
 TEMP_DIFF_THRESHOLD = 1.0  # °C
 
+# Fan hysteresis thresholds -- named here (not just inline in control_loop)
+# so /api/config can expose them and the dashboard doesn't have to hardcode
+# its own copy that could drift out of sync.
+FAN_ON_TEMP = 26.0   # °C, fan switches on above this
+FAN_OFF_TEMP = 24.0  # °C, fan switches off below this
+
+# Toggle Flask's debug mode via .env -- defaults to OFF. Debug mode exposes
+# an interactive Python console in the browser on unhandled errors, which
+# you do NOT want reachable on venue WiFi during a demo. Set FLASK_DEBUG=true
+# in your .env only for your own local development.
+DEBUG_MODE = os.getenv("FLASK_DEBUG", "false").lower() == "true"
+
 
 # ----------------------------------------------------------------------
 # 1. RELAY CONTROL LAYER
@@ -303,9 +315,9 @@ def control_loop():
             if override_device != "fan":
                 if state["occupant_count"] == 0:
                     new_fan_state = False
-                elif state["indoor_temperature"] > 26.0:
+                elif state["indoor_temperature"] > FAN_ON_TEMP:
                     new_fan_state = True
-                elif state["indoor_temperature"] < 24.0:
+                elif state["indoor_temperature"] < FAN_OFF_TEMP:
                     new_fan_state = False
                 else:
                     new_fan_state = state["fan_on"]
@@ -354,6 +366,21 @@ def dashboard():
     return send_from_directory(".", "dashboard.html")
 
 
+@app.route("/api/config", methods=["GET"])
+def get_config():
+    """
+    Exposes the thresholds the decision logic actually uses, so the
+    dashboard can display accurate numbers instead of keeping its own
+    hardcoded copy that could silently drift out of sync.
+    """
+    return jsonify({
+        "fan_on_temp": FAN_ON_TEMP,
+        "fan_off_temp": FAN_OFF_TEMP,
+        "temp_diff_threshold": TEMP_DIFF_THRESHOLD,
+        "energy_price_per_kwh": ENERGY_PRICE_PER_KWH,
+    })
+
+
 @app.route("/api/state", methods=["GET"])
 def get_state():
     with state_lock:
@@ -369,11 +396,20 @@ def sensor_update():
     Expected JSON body:
     { "occupant_count": 3 }
     """
-    data = request.get_json(force=True)
+    data = request.get_json(silent=True)
+    if not data or "occupant_count" not in data:
+        return jsonify({"ok": False, "error": "expected a JSON body with 'occupant_count'"}), 400
+
+    try:
+        occupant_count = int(data["occupant_count"])
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "occupant_count must be a whole number"}), 400
+
+    if occupant_count < 0:
+        return jsonify({"ok": False, "error": "occupant_count can't be negative"}), 400
 
     with state_lock:
-        if "occupant_count" in data:
-            state["occupant_count"] = int(data["occupant_count"])
+        state["occupant_count"] = occupant_count
         state["last_occupancy_update"] = datetime.now(UTC).isoformat()
 
     return jsonify({"ok": True, "state": state})
@@ -391,13 +427,23 @@ def override():
         "duration_minutes": 30
     }
     """
-    data = request.get_json(force=True)
-    device = data.get("device")
-    desired_state = bool(data.get("state", False))
-    duration = int(data.get("duration_minutes", 30))
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"ok": False, "error": "expected a JSON body"}), 400
 
+    device = data.get("device")
     if device not in RELAY_PINS:
-        return jsonify({"ok": False, "error": "unknown device"}), 400
+        return jsonify({"ok": False, "error": f"device must be one of {list(RELAY_PINS)}"}), 400
+
+    desired_state = bool(data.get("state", False))
+
+    try:
+        duration = int(data.get("duration_minutes", 30))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "duration_minutes must be a whole number"}), 400
+
+    if duration <= 0:
+        return jsonify({"ok": False, "error": "duration_minutes must be positive"}), 400
 
     with state_lock:
         expires_at = datetime.now(UTC) + timedelta(minutes=duration)
@@ -441,6 +487,9 @@ def savings_reset():
 if __name__ == "__main__":
     print(f"Relay hardware mode: {HARDWARE_MODE}")
     print(f"BMP280 hardware mode: {BMP_HARDWARE_MODE}")
+    if DEBUG_MODE:
+        print("[WARNING] Flask debug mode is ON -- do not use this on venue WiFi during a demo. "
+              "Set FLASK_DEBUG=false (or remove it) in .env before showing this to judges.")
     threading.Thread(target=control_loop, daemon=True).start()
     threading.Thread(target=weather_loop, daemon=True).start()
-    app.run(debug=True, host="0.0.0.0", port=5000)
+    app.run(debug=DEBUG_MODE, host="0.0.0.0", port=5000)

@@ -222,6 +222,19 @@
 const POLL_MS = 2000;
 const devices = ["fan", "ac", "light"];
 
+// Pulled from /api/config on load, so the dashboard never hardcodes a
+// threshold that could drift out of sync with what the backend actually uses.
+let CONFIG = { fan_on_temp: 26, fan_off_temp: 24, temp_diff_threshold: 1.0, energy_price_per_kwh: 8.0 };
+
+async function loadConfig() {
+  try {
+    const res = await fetch("/api/config");
+    CONFIG = await res.json();
+  } catch (e) {
+    console.warn("Couldn't load /api/config, using fallback defaults", e);
+  }
+}
+
 function fmtCountdown(expiresAtISO) {
   const ms = new Date(expiresAtISO) - new Date();
   if (ms <= 0) return "reverting…";
@@ -301,12 +314,12 @@ async function refresh() {
 
     const diff = Math.abs(state.indoor_temperature - state.outdoor_temperature);
     document.getElementById("diff-value").textContent = diff.toFixed(1) + "°C";
-    document.getElementById("diff-note").textContent = diff > 1.0
+    document.getElementById("diff-note").textContent = diff > CONFIG.temp_diff_threshold
       ? "diff detected → AC forced off"
       : "no meaningful diff → AC unaffected";
 
-    const band = state.indoor_temperature > 26 ? "hot (fan-on threshold)" :
-                 state.indoor_temperature < 24 ? "cool (fan-off threshold)" : "buffer zone";
+    const band = state.indoor_temperature > CONFIG.fan_on_temp ? "hot (fan-on threshold)" :
+                 state.indoor_temperature < CONFIG.fan_off_temp ? "cool (fan-off threshold)" : "buffer zone";
     document.getElementById("temp-band").textContent = "band: " + band;
 
     document.getElementById("occupancy-update").textContent = state.last_occupancy_update
@@ -346,7 +359,7 @@ async function resetSavings() {
 }
 document.getElementById("reset-savings-btn").addEventListener("click", resetSavings);
 
-refresh();
+loadConfig().then(refresh);
 setInterval(refresh, POLL_MS);
 </script>
 </body>
