@@ -367,10 +367,14 @@ def override():
         return jsonify({"ok": False, "error": "duration_minutes must be positive"}), 400
 
     with state_lock:
-        expires_at = datetime.now(UTC) + timedelta(minutes=duration)
+        # No expiry is set here on purpose. Manual overrides (on OR off) hold
+        # indefinitely until the user flips the device again or hits "Auto".
+        # The control loop is the only place that ever starts a countdown,
+        # and it only does that for a forced-ON device once the room goes
+        # unoccupied (an energy-saving auto-revert) — never for forced-OFF.
         state["overrides"][device] = {
             "active": True,
-            "expires_at": expires_at.isoformat(),
+            "expires_at": None,
             "duration_minutes": duration,
         }
 
