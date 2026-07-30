@@ -5,8 +5,8 @@ This is the "brain" of the system. It does three jobs:
 
 1. Holds the current state of the room in memory (occupants, indoor temp,
    outdoor temp, humidity, what each device is doing).
-2. Runs the decision logic (fan hysteresis + indoor/outdoor AC rule +
-   occupancy scaling) on a background loop, and flips relays accordingly.
+2. Runs the decision logic (fan hysteresis + occupancy scaling) on a 
+   background loop, and flips relays accordingly.
 3. Serves the dashboard + a small JSON API so:
    - your radar/camera teammates' script pushes in occupant_count
    - the BMP280 (wired directly to THIS Pi) gives indoor temperature
@@ -34,51 +34,34 @@ app = Flask(__name__)
 # ----------------------------------------------------------------------
 # 0. WEATHER CONFIG (outdoor temperature + humidity)
 # ----------------------------------------------------------------------
-# The API key itself lives in a separate .env file (NOT this file, and NOT
-# committed to GitHub) -- see .env in this same folder:
-#   OPENWEATHER_API_KEY=your_key_here
-# Get a free key at https://openweathermap.org/api if you ever need a new one.
-# Free-tier keys can take up to ~1 hour to activate after signup.
-
 WEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
 
 LATITUDE = 23.073212    
 LONGITUDE = 76.855446
-WEATHER_POLL_SECONDS = 600  # weather doesn't change fast -- every 10 min is plenty
+WEATHER_POLL_SECONDS = 600  
 
 WEATHER_URL = "https://api.openweathermap.org/data/2.5/weather"
 WEATHER_PARAMS = {
     "lat": LATITUDE,
     "lon": LONGITUDE,
     "appid": WEATHER_API_KEY,
-    "units": "metric",  # so temp comes back in °C, not Kelvin
+    "units": "metric",  
 }
 
-# How big a gap between indoor and outdoor temp counts as "there IS a
-# difference"? A small buffer (not 0.0) avoids the AC flicking off from
-# normal sensor noise when the two readings are basically the same.
 TEMP_DIFF_THRESHOLD = 1.0  # °C
 
-# Fan hysteresis thresholds -- named here (not just inline in control_loop)
-# so /api/config can expose them and the dashboard doesn't have to hardcode
-# its own copy that could drift out of sync.
+# Fan hysteresis thresholds 
 FAN_ON_TEMP = 26.0   # °C, fan switches on above this
 FAN_OFF_TEMP = 24.0  # °C, fan switches off below this
 
-# Toggle Flask's debug mode via .env -- defaults to OFF. Debug mode exposes
-# an interactive Python console in the browser on unhandled errors, which
-# you do NOT want reachable on venue WiFi during a demo. Set FLASK_DEBUG=true
-# in your .env only for your own local development.
 DEBUG_MODE = os.getenv("FLASK_DEBUG", "false").lower() == "true"
 
 
 # ----------------------------------------------------------------------
 # 1. RELAY CONTROL LAYER
 # ----------------------------------------------------------------------
-# gpiozero on the real Pi, printed mock otherwise -- so you can develop
-# this whole file on a laptop with zero hardware attached.
-
-RELAY_PINS = {"fan": 17, "ac": 27, "light": 22}
+# Updated relay pins for Fan, Light 1, and Light 2. Adjust pins as needed!
+RELAY_PINS = {"fan": 17, "light_1": 27, "light_2": 22}
 
 try:
     from gpiozero import OutputDevice
@@ -102,10 +85,6 @@ def set_relay(device: str, on: bool):
 # ----------------------------------------------------------------------
 # 2. INDOOR TEMPERATURE SENSOR (BMP280)
 # ----------------------------------------------------------------------
-# Wiring (I2C): VCC -> 3.3V, GND -> GND, SCL -> GPIO3 (pin 5), SDA -> GPIO2 (pin 3)
-# Before this works on the Pi: sudo raspi-config -> Interface Options -> I2C -> enable, then reboot.
-# Install:  pip install smbus2 bmp280
-
 try:
     from smbus2 import SMBus
     from bmp280 import BMP280
@@ -118,59 +97,53 @@ except Exception:
 
 
 def read_indoor_temperature() -> float:
-    """Reads indoor temp from the BMP280. Falls back to a mock reading with no hardware attached."""
     if BMP_HARDWARE_MODE:
         return round(_bmp280.get_temperature(), 1)
     else:
-        # mock mode: random-ish indoor reading so you can test the diff logic
-        # end-to-end before the sensor is wired up
         return round(random.uniform(22.0, 29.0), 1)
 
 
 # ----------------------------------------------------------------------
 # 3. SHARED STATE
 # ----------------------------------------------------------------------
-
 state_lock = threading.Lock()
 
 state = {
     "occupant_count": 0,
-    "indoor_temperature": 25.0,   # from BMP280, on this Pi
-    "outdoor_temperature": 25.0,  # from weather API, or mirrored from indoor if unavailable
-    "humidity": 50.0,             # outdoor humidity, from weather API
-    "weather_available": False,   # true once we've had a successful weather fetch
+    "indoor_temperature": 25.0,   
+    "outdoor_temperature": 25.0,  
+    "humidity": 50.0,             
+    "weather_available": False,   
     "fan_on": False,
-    "ac_level": "off",       # "off" | "low" | "medium" | "max"
-    "light_on": False,
-    "last_occupancy_update": None,  # from your radar/camera teammates
-    "last_weather_update": None,    # from the weather API
-    "weather_error": None,          # so the dashboard can show "weather unreachable"
+    "light_1_on": False,
+    "light_2_on": False,
+    "last_occupancy_update": None,  
+    "last_weather_update": None,    
+    "weather_error": None,          
     "overrides": {
         "fan": {"active": False, "expires_at": None, "duration_minutes": None},
-        "ac": {"active": False, "expires_at": None, "duration_minutes": None},
-        "light": {"active": False, "expires_at": None, "duration_minutes": None},
+        "light_1": {"active": False, "expires_at": None, "duration_minutes": None},
+        "light_2": {"active": False, "expires_at": None, "duration_minutes": None},
     },
     "savings": {
         "tracking_since": datetime.now(UTC).isoformat(),
         "energy_used_kwh": 0.0,
-        "energy_baseline_kwh": 0.0,   # what it WOULD have used if everything ran 24/7
+        "energy_baseline_kwh": 0.0,   
         "energy_saved_kwh": 0.0,
-        "cost_saved": 0.0,            # ₹, matches dashboard.html's sv.cost_saved
+        "cost_saved": 0.0,            
     },
 }
 
 
 # ----------------------------------------------------------------------
-# 4. WEATHER POLLING LOOP (outdoor conditions only)
+# 4. WEATHER POLLING LOOP 
 # ----------------------------------------------------------------------
-
 def fetch_weather():
-    """Hits OpenWeatherMap once and updates state. Never crashes the app if it's down."""
     if not WEATHER_API_KEY:
         with state_lock:
-            state["weather_error"] = "No OPENWEATHER_API_KEY found -- check your .env file"
+            state["weather_error"] = "No OPENWEATHER_API_KEY found"
             state["weather_available"] = False
-        print("[WEATHER] No API key loaded -- is .env present with OPENWEATHER_API_KEY set?")
+        print("[WEATHER] No API key loaded")
         return
 
     try:
@@ -185,16 +158,10 @@ def fetch_weather():
             state["weather_error"] = None
             state["weather_available"] = True
 
-        print(f"[WEATHER] outdoor {state['outdoor_temperature']}°C, {state['humidity']}% humidity")
-
     except Exception as e:
-        # don't zero out -- the control loop will mirror indoor temp onto
-        # outdoor_temperature every tick while weather_available is False,
-        # so the dashboard always has a real, live number to show
         with state_lock:
             state["weather_error"] = str(e)
             state["weather_available"] = False
-        print(f"[WEATHER] fetch failed: {e}")
 
 
 def weather_loop():
@@ -206,28 +173,20 @@ def weather_loop():
 # ----------------------------------------------------------------------
 # 4b. SAVINGS TRACKER
 # ----------------------------------------------------------------------
-# Compares actual energy used against a baseline of "everything ran
-# continuously since tracking started" to estimate money saved. Feeds the
-# "Financial Savings" card on the dashboard.
+# Fixed for new devices.
+APPLIANCE_WATTS = {"fan": 75, "light_1": 20, "light_2": 20} 
+ENERGY_PRICE_PER_KWH = 8.0  
+TICK_SECONDS = 2  
 
-# Rough wattage estimates -- adjust to match whatever you actually demo with.
-APPLIANCE_WATTS = {"fan": 75, "light": 40, "ac": 1500}  # ac watts = its "max" draw
-AC_LEVEL_FACTOR = {"off": 0.0, "low": 0.3, "medium": 0.6, "max": 1.0}
-ENERGY_PRICE_PER_KWH = 8.0  # ₹ per unit -- change to your local electricity tariff
-TICK_SECONDS = 2  # must match the time.sleep() at the bottom of control_loop
-
-# Internal bookkeeping -- NOT sent to the frontend directly, only the
-# computed results in state["savings"] are.
-_on_seconds = {"fan": 0.0, "light": 0.0, "ac_weighted": 0.0}
-
+_on_seconds = {"fan": 0.0, "light_1": 0.0, "light_2": 0.0}
 
 def update_savings(now: datetime):
-    """Called once per control_loop tick, while state_lock is already held."""
     if state["fan_on"]:
         _on_seconds["fan"] += TICK_SECONDS
-    if state["light_on"]:
-        _on_seconds["light"] += TICK_SECONDS
-    _on_seconds["ac_weighted"] += TICK_SECONDS * AC_LEVEL_FACTOR[state["ac_level"]]
+    if state["light_1_on"]:
+        _on_seconds["light_1"] += TICK_SECONDS
+    if state["light_2_on"]:
+        _on_seconds["light_2"] += TICK_SECONDS
 
     tracking_since = datetime.fromisoformat(state["savings"]["tracking_since"])
     elapsed_seconds = (now - tracking_since).total_seconds()
@@ -235,14 +194,14 @@ def update_savings(now: datetime):
         return
 
     baseline_kwh = (
-        (APPLIANCE_WATTS["fan"] + APPLIANCE_WATTS["light"] + APPLIANCE_WATTS["ac"])
+        (APPLIANCE_WATTS["fan"] + APPLIANCE_WATTS["light_1"] + APPLIANCE_WATTS["light_2"])
         * (elapsed_seconds / 3600)
     ) / 1000
 
     used_kwh = (
         APPLIANCE_WATTS["fan"] * (_on_seconds["fan"] / 3600)
-        + APPLIANCE_WATTS["light"] * (_on_seconds["light"] / 3600)
-        + APPLIANCE_WATTS["ac"] * (_on_seconds["ac_weighted"] / 3600)
+        + APPLIANCE_WATTS["light_1"] * (_on_seconds["light_1"] / 3600)
+        + APPLIANCE_WATTS["light_2"] * (_on_seconds["light_2"] / 3600)
     ) / 1000
 
     saved_kwh = baseline_kwh - used_kwh
@@ -254,10 +213,9 @@ def update_savings(now: datetime):
 
 
 def reset_savings():
-    """Called by the dashboard's 'Reset Counter' button, while state_lock is held."""
     _on_seconds["fan"] = 0.0
-    _on_seconds["light"] = 0.0
-    _on_seconds["ac_weighted"] = 0.0
+    _on_seconds["light_1"] = 0.0
+    _on_seconds["light_2"] = 0.0
     state["savings"] = {
         "tracking_since": datetime.now(UTC).isoformat(),
         "energy_used_kwh": 0.0,
@@ -270,54 +228,24 @@ def reset_savings():
 # ----------------------------------------------------------------------
 # 5. DECISION LOGIC ("the brain")
 # ----------------------------------------------------------------------
-
-def ac_level_for(occupant_count: int) -> str:
-    if occupant_count <= 0:
-        return "off"
-    elif occupant_count <= 5:
-        return "low"
-    elif occupant_count <= 20:
-        return "medium"
-    else:
-        return "max"
-
-
 def _device_on(device: str) -> bool:
-    """True if the given device is currently drawing power, regardless of auto/manual."""
-    if device == "ac":
-        return state["ac_level"] != "off"
     return state[f"{device}_on"]
 
 
 def control_loop():
     while True:
-        # do the I2C read BEFORE grabbing the lock, so the lock is held for
-        # as short a time as possible
         indoor_temp = read_indoor_temperature()
 
         with state_lock:
             state["indoor_temperature"] = indoor_temp
 
-            # If we have no working weather feed, mirror outdoor to indoor so
-            # there's always a real, live number on the dashboard (never a
-            # stale default) -- and the diff naturally becomes 0, so the
-            # AC diff-rule below won't misfire from missing data.
             if not state["weather_available"]:
                 state["outdoor_temperature"] = indoor_temp
 
             now = datetime.now(UTC)
             occupied = state["occupant_count"] > 0
 
-            # Each device tracks its own override independently. The auto-revert
-            # countdown is occupancy-aware, not just a fixed timer from creation:
-            #
-            #   - Manually turned OFF while someone's still in the room -> that
-            #     was a deliberate call, so we DON'T start/keep a revert
-            #     countdown. It stays off until someone cancels it or the room
-            #     empties and it gets turned back on some other way.
-            #   - Left ON while the room is empty -> that's the wasteful case
-            #     (lights on with nobody there), so a countdown to auto-revert
-            #     starts (or keeps running) until it reverts to automatic.
+            # Override Auto-revert logic
             for dev_name, ov in state["overrides"].items():
                 if not ov["active"]:
                     continue
@@ -325,30 +253,20 @@ def control_loop():
                 on_now = _device_on(dev_name)
 
                 if occupied and not on_now:
-                    # Deliberate manual OFF while people are present -- pause
-                    # any countdown, hold this state indefinitely.
                     if ov["expires_at"] is not None:
-                        print(f"[OVERRIDE] {dev_name} manually off while occupied -- countdown paused")
-                    ov["expires_at"] = None
+                        ov["expires_at"] = None
 
                 elif not occupied and on_now:
-                    # Left on with nobody in the room -- start a countdown if
-                    # one isn't already running.
                     if ov["expires_at"] is None:
                         minutes = ov.get("duration_minutes") or 30
                         ov["expires_at"] = (now + timedelta(minutes=minutes)).isoformat()
-                        print(f"[OVERRIDE] {dev_name} left on with room empty -- reverting in {minutes}m")
-
-                # else (occupied+on, or empty+off): leave the countdown as-is
 
                 if ov["expires_at"] is not None and now >= datetime.fromisoformat(ov["expires_at"]):
-                    print(f"[OVERRIDE] {dev_name} override expired, reverting to auto")
                     ov["active"] = False
                     ov["expires_at"] = None
                     ov["duration_minutes"] = None
 
-            # FAN: temperature hysteresis, now using the real INDOOR reading,
-            # gated by occupancy
+            # FAN logic
             if not state["overrides"]["fan"]["active"]:
                 if state["occupant_count"] == 0:
                     new_fan_state = False
@@ -363,32 +281,21 @@ def control_loop():
                     state["fan_on"] = new_fan_state
                     set_relay("fan", new_fan_state)
 
-            # AC: combines your indoor/outdoor diff rule with occupancy-based
-            # dynamic load scaling.
-            # - If indoor/outdoor temps meaningfully differ -> force AC off.
-            # - Otherwise -> scale AC to occupant count (ac_level_for), so it
-            #   can actually turn ON, not just off. This restores the "Dynamic
-            #   Load Scaling" behavior from the pitch deck, which the diff
-            #   rule alone couldn't do by itself.
-            if not state["overrides"]["ac"]["active"]:
-                diff = abs(state["indoor_temperature"] - state["outdoor_temperature"])
-                if diff > TEMP_DIFF_THRESHOLD:
-                    new_ac_level = "off"
-                else:
-                    new_ac_level = ac_level_for(state["occupant_count"])
-
-                if new_ac_level != state["ac_level"]:
-                    state["ac_level"] = new_ac_level
-                    set_relay("ac", new_ac_level != "off")
-
-            # LIGHT: occupancy only
-            if not state["overrides"]["light"]["active"]:
+            # LIGHT 1 logic
+            if not state["overrides"]["light_1"]["active"]:
                 new_light_state = state["occupant_count"] > 0
-                if new_light_state != state["light_on"]:
-                    state["light_on"] = new_light_state
-                    set_relay("light", new_light_state)
+                if new_light_state != state["light_1_on"]:
+                    state["light_1_on"] = new_light_state
+                    set_relay("light_1", new_light_state)
 
-            # SAVINGS: update the running ROI numbers using this tick's device states
+            # LIGHT 2 logic
+            if not state["overrides"]["light_2"]["active"]:
+                new_light_state = state["occupant_count"] > 0
+                if new_light_state != state["light_2_on"]:
+                    state["light_2_on"] = new_light_state
+                    set_relay("light_2", new_light_state)
+
+            # Update savings ROI
             update_savings(now)
 
         time.sleep(TICK_SECONDS)
@@ -397,7 +304,6 @@ def control_loop():
 # ----------------------------------------------------------------------
 # 6. API ROUTES
 # ----------------------------------------------------------------------
-
 @app.route("/")
 def dashboard():
     return send_from_directory(".", "dashboard.html")
@@ -405,11 +311,6 @@ def dashboard():
 
 @app.route("/api/config", methods=["GET"])
 def get_config():
-    """
-    Exposes the thresholds the decision logic actually uses, so the
-    dashboard can display accurate numbers instead of keeping its own
-    hardcoded copy that could silently drift out of sync.
-    """
     return jsonify({
         "fan_on_temp": FAN_ON_TEMP,
         "fan_off_temp": FAN_OFF_TEMP,
@@ -426,13 +327,6 @@ def get_state():
 
 @app.route("/api/sensor-update", methods=["POST"])
 def sensor_update():
-    """
-    Your radar/camera teammates' script POSTs here whenever it has a fresh
-    occupant count.
-
-    Expected JSON body:
-    { "occupant_count": 3 }
-    """
     data = request.get_json(silent=True)
     if not data or "occupant_count" not in data:
         return jsonify({"ok": False, "error": "expected a JSON body with 'occupant_count'"}), 400
@@ -454,16 +348,6 @@ def sensor_update():
 
 @app.route("/api/override", methods=["POST"])
 def override():
-    """
-    Manual control from the dashboard, with an auto-revert timer.
-
-    Expected JSON body:
-    {
-        "device": "fan",          # "fan" | "ac" | "light"
-        "state": true,
-        "duration_minutes": 30
-    }
-    """
     data = request.get_json(silent=True)
     if not data:
         return jsonify({"ok": False, "error": "expected a JSON body"}), 400
@@ -492,10 +376,10 @@ def override():
 
         if device == "fan":
             state["fan_on"] = desired_state
-        elif device == "light":
-            state["light_on"] = desired_state
-        elif device == "ac":
-            state["ac_level"] = "max" if desired_state else "off"
+        elif device == "light_1":
+            state["light_1_on"] = desired_state
+        elif device == "light_2":
+            state["light_2_on"] = desired_state
 
         set_relay(device, desired_state)
 
@@ -504,10 +388,6 @@ def override():
 
 @app.route("/api/override/cancel", methods=["POST"])
 def cancel_override():
-    """
-    Expected JSON body:
-    { "device": "fan" }   # "fan" | "ac" | "light"
-    """
     data = request.get_json(silent=True)
     device = data.get("device") if data else None
     if device not in RELAY_PINS:
@@ -520,7 +400,6 @@ def cancel_override():
 
 @app.route("/api/savings/reset", methods=["POST"])
 def savings_reset():
-    """Called by the dashboard's 'Reset Counter' button."""
     with state_lock:
         reset_savings()
     return jsonify({"ok": True, "state": state})
@@ -529,13 +408,11 @@ def savings_reset():
 # ----------------------------------------------------------------------
 # 7. START EVERYTHING
 # ----------------------------------------------------------------------
-
 if __name__ == "__main__":
     print(f"Relay hardware mode: {HARDWARE_MODE}")
     print(f"BMP280 hardware mode: {BMP_HARDWARE_MODE}")
     if DEBUG_MODE:
-        print("[WARNING] Flask debug mode is ON -- do not use this on venue WiFi during a demo. "
-              "Set FLASK_DEBUG=false (or remove it) in .env before showing this to judges.")
+        print("[WARNING] Flask debug mode is ON")
     threading.Thread(target=control_loop, daemon=True).start()
     threading.Thread(target=weather_loop, daemon=True).start()
     app.run(debug=DEBUG_MODE, host="0.0.0.0", port=5000)
