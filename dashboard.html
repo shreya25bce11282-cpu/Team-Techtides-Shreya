@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AEGIS-Eco · Room Console</title>
+<style>
+  :root {
+    --bg: #0b0e11;
+    --panel: #12161b;
+    --line: #232a31;
+    --text: #f5f7fa;
+    --muted: #8b98a5;
+    --live: #00ff9c;
+    --warn: #ffb020;
+    --off: #3a4249;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Inter", system-ui, -apple-system, sans-serif;
+    padding: 32px 20px 60px;
+  }
+
+  .wrap { max-width: 960px; margin: 0 auto; }
+
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 28px;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  h1 {
+    font-size: 20px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    margin: 0;
+    font-weight: 700;
+  }
+  h1 span { color: var(--live); }
+
+  .conn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--live);
+    box-shadow: 0 0 8px var(--live);
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+  /* --- radar sweep signature element --- */
+  .radar {
+    position: relative;
+    width: 120px; height: 120px;
+    border-radius: 50%;
+    border: 1px solid var(--line);
+    background:
+      radial-gradient(circle, transparent 0 55%, var(--line) 55% 56%, transparent 56%),
+      radial-gradient(circle, transparent 0 30%, var(--line) 30% 31%, transparent 31%);
+    margin: 0 auto 8px;
+    overflow: hidden;
+  }
+  .radar::before {
+    content: "";
+    position: absolute; inset: 0;
+    background: conic-gradient(from 0deg, var(--live) 0deg, transparent 40deg);
+    animation: sweep 2.4s linear infinite;
+    opacity: 0.55;
+  }
+  @keyframes sweep { to { transform: rotate(360deg); } }
+  .radar-count {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-family: monospace;
+    font-size: 30px; font-weight: 700;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 18px;
+  }
+  .card .label {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin-bottom: 10px;
+  }
+  .src-tag {
+    font-size: 10px;
+    color: var(--live);
+    text-transform: none;
+    letter-spacing: 0;
+    margin-left: 6px;
+  }
+  .card .value {
+    font-family: monospace;
+    font-size: 28px;
+    font-weight: 700;
+  }
+  .card .sub { color: var(--muted); font-size: 13px; margin-top: 4px; }
+
+  .devices { display: flex; flex-direction: column; gap: 12px; }
+  .device-row {
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 18px;
+  }
+  .device-row .name { font-weight: 600; }
+  .device-row .status {
+    font-family: monospace; font-size: 13px; color: var(--muted);
+  }
+  .device-row .status.on { color: var(--live); }
+  .device-row .status.override { color: var(--warn); }
+
+  .btn-group { display: flex; gap: 8px; }
+  button {
+    background: transparent;
+    border: 1px solid var(--line);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 7px 12px;
+    font-size: 13px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  button:hover { border-color: var(--live); color: var(--live); }
+  button.cancel:hover { border-color: var(--warn); color: var(--warn); }
+
+  footer {
+    text-align: center;
+    color: var(--muted);
+    font-size: 12px;
+    margin-top: 30px;
+    font-family: monospace;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>AEGIS<span>-Eco</span> · Room Console</h1>
+    <div class="conn"><span class="dot"></span><span id="conn-text">connecting…</span></div>
+  </header>
+
+  <div class="grid" style="grid-template-columns: 160px repeat(auto-fit, minmax(180px, 1fr));">
+    <div class="card" style="text-align:center;">
+      <div class="radar">
+        <div class="radar-count" id="occupant-count">0</div>
+      </div>
+      <div class="label">Occupants</div>
+    </div>
+
+    <div class="card">
+      <div class="label">Indoor Temp <span class="src-tag">via BMP280</span></div>
+      <div class="value" id="indoor-temp-value">--°C</div>
+      <div class="sub" id="temp-band">band: --</div>
+    </div>
+
+    <div class="card">
+      <div class="label">Outdoor Temp <span class="src-tag">via Weather API</span></div>
+      <div class="value" id="outdoor-temp-value">--°C</div>
+      <div class="sub" id="weather-update">weather updated: --</div>
+    </div>
+
+    <div class="card">
+      <div class="label">Indoor/Outdoor Diff</div>
+      <div class="value" id="diff-value">--°C</div>
+      <div class="sub" id="diff-note">--</div>
+    </div>
+
+    <div class="card">
+      <div class="label">Humidity <span class="src-tag">via Weather API</span></div>
+      <div class="value" id="humidity-value">--%</div>
+    </div>
+  </div>
+
+  <div class="sub" id="occupancy-update" style="text-align:center; margin-bottom:20px;">last occupancy update: --</div>
+
+  <div class="devices" id="devices"></div>
+
+  <footer id="hw-mode">AEGIS-Eco backend</footer>
+</div>
+
+<script>
+const POLL_MS = 2000;
+const devices = ["fan", "ac", "light"];
+
+function fmtCountdown(expiresAtISO) {
+  const ms = new Date(expiresAtISO) - new Date();
+  if (ms <= 0) return "reverting…";
+  const mins = Math.floor(ms / 60000);
+  const secs = Math.floor((ms % 60000) / 1000);
+  return `reverts in ${mins}m ${secs}s`;
+}
+
+function renderDevices(state) {
+  const container = document.getElementById("devices");
+  container.innerHTML = "";
+
+  devices.forEach((dev) => {
+    const isOverridden = state.override.active && state.override.device === dev;
+    let statusText, isOn;
+
+    if (dev === "ac") {
+      isOn = state.ac_level !== "off";
+      statusText = state.ac_level.toUpperCase();
+    } else {
+      isOn = state[dev + "_on"];
+      statusText = isOn ? "ON" : "OFF";
+    }
+
+    const row = document.createElement("div");
+    row.className = "device-row";
+
+    const statusClass = isOverridden ? "override" : (isOn ? "on" : "");
+    const overrideNote = isOverridden ? ` · manual · ${fmtCountdown(state.override.expires_at)}` : " · auto";
+
+    row.innerHTML = `
+      <div>
+        <div class="name">${dev.toUpperCase()}</div>
+        <div class="status ${statusClass}">${statusText}${overrideNote}</div>
+      </div>
+      <div class="btn-group">
+        <button data-dev="${dev}" data-on="true">Force ON</button>
+        <button data-dev="${dev}" data-on="false">Force OFF</button>
+        ${isOverridden ? `<button class="cancel" data-cancel="${dev}">Cancel</button>` : ""}
+      </div>
+    `;
+    container.appendChild(row);
+  });
+
+  container.querySelectorAll("button[data-dev]").forEach((btn) => {
+    btn.addEventListener("click", () => sendOverride(btn.dataset.dev, btn.dataset.on === "true"));
+  });
+  container.querySelectorAll("button[data-cancel]").forEach((btn) => {
+    btn.addEventListener("click", () => cancelOverride(btn.dataset.cancel));
+  });
+}
+
+async function sendOverride(device, on) {
+  await fetch("/api/override", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ device, state: on, duration_minutes: 30 }),
+  });
+  refresh();
+}
+
+async function cancelOverride(device) {
+  await fetch("/api/override/cancel", { method: "POST" });
+  refresh();
+}
+
+async function refresh() {
+  try {
+    const res = await fetch("/api/state");
+    const state = await res.json();
+
+    document.getElementById("conn-text").textContent = "live";
+    document.getElementById("occupant-count").textContent = state.occupant_count;
+    document.getElementById("indoor-temp-value").textContent = state.indoor_temperature.toFixed(1) + "°C";
+    document.getElementById("outdoor-temp-value").textContent = state.outdoor_temperature.toFixed(1) + "°C";
+    document.getElementById("humidity-value").textContent = state.humidity.toFixed(0) + "%";
+
+    const diff = Math.abs(state.indoor_temperature - state.outdoor_temperature);
+    document.getElementById("diff-value").textContent = diff.toFixed(1) + "°C";
+    document.getElementById("diff-note").textContent = diff > 1.0
+      ? "diff detected → AC forced off"
+      : "no meaningful diff → AC unaffected";
+
+    const band = state.indoor_temperature > 26 ? "hot (fan-on threshold)" :
+                 state.indoor_temperature < 24 ? "cool (fan-off threshold)" : "buffer zone";
+    document.getElementById("temp-band").textContent = "band: " + band;
+
+    document.getElementById("occupancy-update").textContent = state.last_occupancy_update
+      ? "last occupancy update: " + new Date(state.last_occupancy_update).toLocaleTimeString()
+      : "waiting for occupancy data…";
+
+    if (state.weather_error) {
+      document.getElementById("weather-update").textContent = "weather API unreachable — showing last known values";
+    } else {
+      document.getElementById("weather-update").textContent = state.last_weather_update
+        ? "weather updated: " + new Date(state.last_weather_update).toLocaleTimeString()
+        : "waiting for first weather fetch…";
+    }
+
+    renderDevices(state);
+  } catch (e) {
+    document.getElementById("conn-text").textContent = "disconnected";
+  }
+}
+
+refresh();
+setInterval(refresh, POLL_MS);
+</script>
+</body>
+</html>
