@@ -246,8 +246,6 @@ No relay board wired up? Same story — every `set_relay()` call just prints `[M
 | **Occupancy itself** | Not just the latest reading — if the sensor reports 0 people, the room is still treated as occupied for up to `OCCUPANCY_GRACE_SECONDS` (16s) after the last positive reading, so one bad frame doesn't flicker every device off and back on. |
 | **Any device** | Can be force-overridden from the dashboard (on or off), and holds indefinitely — *except* a forced-ON device automatically starts a revert-to-auto countdown as soon as the room goes empty, so nobody has to remember to turn it back off. |
 
-> **Heads up if you're presenting this:** `app.py` still defines `FAN_ON_TEMP`, `FAN_OFF_TEMP`, and `TEMP_DIFF_THRESHOLD`, and serves them via `/api/config` — but as of the current control loop, **temperature no longer gates the fan or any device**; everything is purely occupancy-driven. Those constants are vestiges of an earlier temperature-hysteresis version. They're harmless (the dashboard just uses them to label the indoor-temp "band" for display), but if a judge asks "walk me through the fan's temperature hysteresis," the honest answer is: it's defined but not wired into the current decision logic. Worth either re-wiring it in (e.g. `occupied and indoor_temp > FAN_ON_TEMP`) or removing the unused constants before a demo, so the code and the pitch say the same thing.
-
 ---
 
 ## API reference
