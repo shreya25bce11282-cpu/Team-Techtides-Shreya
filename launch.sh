@@ -12,8 +12,8 @@ source /home/raspberrypi/yolo_object/bin/activate
 # 1. Start the Flask Backend in the background
 python app.py > backend_error.log 2>&1 &
 
-# 2. Start the Camera Node in the background (libcamerify removed to prevent segfault)
-python camera_node.py > camera_error.log 2>&1 &
+# 2. Start the Camera Node in the background (detached input to prevent segfault)
+libcamerify python camera_node.py < /dev/null > camera_error.log 2>&1 &
 
 # 3. Wait 10 seconds for the servers to spin up
 sleep 10
