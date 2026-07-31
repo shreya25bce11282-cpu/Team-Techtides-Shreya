@@ -312,19 +312,21 @@ def control_loop():
                     ov["expires_at"] = None
                     ov["duration_minutes"] = None
 
+            current_count = state["occupant_count"]
+
             # LIGHT 1 logic
             if not state["overrides"]["light_1"]["active"]:
-                new_light_state = occupied
-                if new_light_state != state["light_1_on"]:
-                    state["light_1_on"] = new_light_state
-                    set_relay("light_1", new_light_state)
+                new_light_1_state = occupied
+                if new_light_1_state != state["light_1_on"]:
+                    state["light_1_on"] = new_light_1_state
+                    set_relay("light_1", new_light_1_state)
 
             # LIGHT 2 logic
             if not state["overrides"]["light_2"]["active"]:
-                new_light_state = occupied
-                if new_light_state != state["light_2_on"]:
-                    state["light_2_on"] = new_light_state
-                    set_relay("light_2", new_light_state)
+                new_light_2_state = occupied and (current_count >= 2)
+                if new_light_2_state != state["light_2_on"]:
+                    state["light_2_on"] = new_light_2_state
+                    set_relay("light_2", new_light_2_state)
 
             # FAN logic (Now triggered right after lights and directly follows occupancy state)
             if not state["overrides"]["fan"]["active"]:
