@@ -60,7 +60,7 @@ FAN_OFF_TEMP = 24.0  # °C, fan switches off below this
 # detection (motion blur, someone turning away, brief occlusion) would
 # otherwise instantly read as "room empty" and flick the fan/lights off, then
 # back on next frame. This grace window smooths that out.
-OCCUPANCY_GRACE_SECONDS = 60.0
+OCCUPANCY_GRACE_SECONDS = 16.0
 
 # The BMP280 gives a fresh, individually-noisy reading every control-loop tick
 # (every TICK_SECONDS). A single noisy sample right at the FAN_ON_TEMP /
