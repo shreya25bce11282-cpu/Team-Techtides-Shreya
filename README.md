@@ -53,7 +53,8 @@ This repository holds the **backend brain, the occupancy-sensing node, and the w
 
 ## Screenshot
 
-![AEGIS-Eco dashboard](Image/dashboard_screenshot.png)
+![AEGIS-Eco dashboard]<img width="1192" height="851" alt="image" src="https://github.com/user-attachments/assets/a201a90e-277a-4687-ad62-b656b29b396a" />
+
 
 *Live occupant count, indoor/outdoor temperature, humidity, a running ₹ savings estimate, and per-device Force ON / Auto / Force OFF controls.*
 
