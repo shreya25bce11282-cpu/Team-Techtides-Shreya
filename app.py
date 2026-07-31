@@ -80,9 +80,18 @@ DEBUG_MODE = os.getenv("FLASK_DEBUG", "false").lower() == "true"
 # Updated relay pins for Fan, Light 1, and Light 2. Adjust pins as needed!
 RELAY_PINS = {"fan": 17, "light_1": 27, "light_2": 22}
 
+# Most common relay boards (the cheap blue 1/2/4-channel modules) are
+# ACTIVE-LOW: the relay energizes (appliance ON) when the GPIO pin goes LOW,
+# not HIGH. If your board is the opposite (appliance turns ON when you
+# expect OFF, after this fix), flip this one line to True and restart.
+RELAY_ACTIVE_HIGH = False
+
 try:
     from gpiozero import OutputDevice
-    _relays = {name: OutputDevice(pin) for name, pin in RELAY_PINS.items()}
+    _relays = {
+        name: OutputDevice(pin, active_high=RELAY_ACTIVE_HIGH, initial_value=False)
+        for name, pin in RELAY_PINS.items()
+    }
     HARDWARE_MODE = True
 except Exception:
     _relays = {}
