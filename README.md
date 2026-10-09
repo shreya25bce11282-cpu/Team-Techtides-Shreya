@@ -1,6 +1,6 @@
 <div align="center">
 
-# AEGIS-Eco
+# Project Falcon
 
 **A privacy-first edge device that watches a room breathe, and only spends energy when someone's actually there.**
 
@@ -45,7 +45,7 @@ Empty classrooms and offices burn electricity for hours because dumb PIR sensors
 
 ## The idea
 
-AEGIS-Eco watches a room with an on-device camera pipeline to know whether anyone is actually present, then switches lighting and a fan to match — entirely on the edge, with zero video ever leaving the room.
+Project Falcon watches a room with an on-device camera pipeline to know whether anyone is actually present, then switches lighting and a fan to match — entirely on the edge, with zero video ever leaving the room.
 
 This repository holds the **backend brain, the occupancy-sensing node, and the web dashboard**: the Flask service that turns sensor readings into device decisions, the camera script that counts people, and the live console that lets admins watch it all happen.
 
@@ -53,7 +53,7 @@ This repository holds the **backend brain, the occupancy-sensing node, and the w
 
 ## Screenshot
 
-![AEGIS-Eco dashboard]<img width="1192" height="851" alt="image" src="https://github.com/user-attachments/assets/a201a90e-277a-4687-ad62-b656b29b396a" />
+![Project Falcon dashboard]<img width="1192" height="851" alt="image" src="https://github.com/user-attachments/assets/a201a90e-277a-4687-ad62-b656b29b396a" />
 
 
 *Live occupant count, indoor/outdoor temperature, humidity, a running ₹ savings estimate, and per-device Force ON / Auto / Force OFF controls.*
@@ -366,12 +366,12 @@ Being upfront about these now is a lot better than a judge or a new contributor 
 
 ## Future scope
 
-The roadmap above is near-term — things that make the current system correct and demo-ready. This section is the longer-term vision: where AEGIS-Eco could go if it grew past a single-room hackathon build.
+The roadmap above is near-term — things that make the current system correct and demo-ready. This section is the longer-term vision: where Project Falcon could go if it grew past a single-room hackathon build.
 
 - **Real mmWave radar fusion** — pair the existing camera pipeline with an actual 24GHz radar module (breathing/micro-motion detection) so occupancy still works in low light, through partial camera occlusion, or when someone's sitting still enough that motion-gating alone would miss them.
 - **Campus-scale deployment** — one Pi per room reporting into a central dashboard/database, so a facilities team can see every room's occupancy, energy use, and savings from a single screen instead of walking to each panel.
 - **Predictive control, not just reactive** — use historical occupancy patterns (e.g. "this lecture hall is always full 9–11am on Tuesdays") to pre-cool or pre-light a room slightly ahead of expected arrival, instead of reacting only after someone's already detected.
-- **Integration with existing Building Management Systems (BMS)** — expose AEGIS-Eco's state over a standard protocol (e.g. MQTT, BACnet) so it can plug into whatever a building already runs, rather than only working standalone.
+- **Integration with existing Building Management Systems (BMS)** — expose Project Falcon's state over a standard protocol (e.g. MQTT, BACnet) so it can plug into whatever a building already runs, rather than only working standalone.
 - **Mobile app / push notifications** — a lightweight companion app for facilities staff, so overriding a device or checking a room's status doesn't require being on the same network as the dashboard.
 - **Solar/renewable-aware scheduling** — if a building has solar panels or time-of-use electricity pricing, shift discretionary loads (e.g. pre-cooling) toward periods of cheap/renewable power instead of only reacting to occupancy.
 - **Fine-grained AC control** — reintroduce AC as a controlled device (it was part of an earlier version of this system) with proper compressor-safe minimum-off-time logic, once the occupancy-scaling approach is validated on fan/light alone.
